@@ -29,7 +29,6 @@
  */
 
 #include "MK60D10.h"
-#include <stdio.h>
 
 #define BUTTON_UP_MASK 0b100000000000000000000000000
 #define BUTTON_CENT_MASK 0b100000000000
@@ -77,6 +76,10 @@ struct snake_part{
 };
 
 struct snake_part snake[SNAKE_LEN];
+int dead_snake = 0;
+int rip_move = 0;
+
+void column_select(unsigned int col_num);
 
 
 /* Configuration of the necessary MCU peripherals */
@@ -130,11 +133,27 @@ void SystemConfig() {
 						| PORT_PCR_PE(0x01) /* Pull resistor enable... */
 						| PORT_PCR_PS(0x01)); /* ...select Pull-Up */
 
+	NVIC_ClearPendingIRQ(PORTE_IRQn);
+	NVIC_EnableIRQ(PORTE_IRQn);
+
+	SIM->SCGC6 |= SIM_SCGC6_PIT_MASK;
+
+	PIT_MCR = 0x00; // enable PIT clock
+	PIT_TFLG0 |= PIT_TFLG_TIF_MASK; // interruption flag clear
+	PIT_TCTRL0 = PIT_TCTRL_TIE_MASK; // interruption enable
+	PIT_TCTRL0 |= PIT_TCTRL_TEN_MASK; // start clock 0
+	PIT_LDVAL0 = 100000;
+
+	NVIC_ClearPendingIRQ(PIT0_IRQn);
+	NVIC_EnableIRQ(PIT0_IRQn);
+
 	/* Change corresponding PTA port pins as outputs */
 	PTA->PDDR = GPIO_PDDR_PDD(0x3F000FC0);
 
 	/* Change corresponding PTE port pins as outputs */
 	PTE->PDDR = GPIO_PDDR_PDD( GPIO_PIN(28) );
+
+	dead_snake = 0;
 }
 
 
@@ -148,6 +167,7 @@ void delay(int t1, int t2)
 	}
 }
 
+
 void delay_letter(int t1, int t2, int value)
 {
 	for(int i=0; i<t1; i++) {
@@ -157,64 +177,71 @@ void delay_letter(int t1, int t2, int value)
 	}
 }
 
-void rip(){
-	column_select(1);
+void rip(int column_num){
+			column_select(column_num);
 	    	//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R1 | R2 | R3 | R4 | R5 | R6));
 	    	delay_letter(20,100, (R0 | R1 | R2 | R3 | R4 | R5 | R6));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(2);
+			column_select(column_num + 1);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R4));
 			delay_letter(20,100, (R0 | R4));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(3);
+			column_select(column_num + 2);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R3 | R5));
 			delay_letter(20,100, (R0 | R3 | R5));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(4);
+			column_select(column_num + 3);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R1 | R2 | R6));
 			delay_letter(20,100, (R1 | R2 | R6));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(6);
+			column_select(column_num + 5);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R6));
 			delay_letter(20,100, (R0 | R6));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
 
-			column_select(7);
+			column_select(column_num + 6);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R1 | R2 | R3 | R4 | R5 | R6));
 			delay_letter(20,100, (R0 | R1 | R2 | R3 | R4 | R5 | R6));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(8);
+			column_select(column_num + 7);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R6));
 			delay_letter(20,100, (R0 | R6));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(10);
+			column_select(column_num + 9);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R6));
 			delay_letter(20,100, (R0 | R1 | R2 | R3 | R4 | R5 | R6));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(11);
+			column_select(column_num + 10);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R6));
 			delay_letter(20,100, (R0 | R3));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(12);
+			column_select(column_num + 11);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R6));
 			delay_letter(20,100, (R0 | R3));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 
-			column_select(13);
+			column_select(column_num + 12);
 			//PTA->PDOR |= GPIO_PDOR_PDO((R0 | R6));
 			delay_letter(20,100, (R1 | R2));
 			PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
 }
 
+void delay_rip(int t1, int t2, int ripnum){
+	for(int i=0; i<t1; i++) {
+			for(int j=0; j<t2; j++){
+				rip(ripnum);
+			}
+		}
+}
 
 
 /* Conversion of requested column number into the 4-to-16 decoder control.  */
@@ -362,21 +389,66 @@ void delay_snake(int t1, int t2)
 }
 
 
+void PORTE_IRQHandler(void) {
+	if (PORTE->ISFR & BUTTON_CENT_MASK)
+	{
+		for(int i = 0; i < SNAKE_LEN; i++){
+			snake[i].x = 4;
+			snake[i].y = 7 + i;
+			snake[i].direction = UP;
+			snake[0].direction_prev = snake[0].direction;
+		}
+
+		dead_snake = 0;
+		rip_move = 0;
+
+		PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
+	}
+
+	else if (PORTE->ISFR & BUTTON_RIGHT_MASK)
+	{
+		snake[0].direction_prev = snake[0].direction;
+		snake[0].direction = RIGHT;
+	}
+	else if (PORTE->ISFR & BUTTON_LEFT_MASK)
+	{
+		snake[0].direction_prev = snake[0].direction;
+		snake[0].direction = LEFT;
+	}
+	else if (PORTE->ISFR & BUTTON_UP_MASK)
+	{
+		snake[0].direction_prev = snake[0].direction;
+		snake[0].direction = UP;
+	}
+	else if (PORTE->ISFR & BUTTON_DOWN_MASK)
+	{
+		snake[0].direction_prev = snake[0].direction;
+		snake[0].direction = DOWN;
+	}
+	PORTE->ISFR = BUTTON_UP_MASK | BUTTON_CENT_MASK | BUTTON_LEFT_MASK | BUTTON_DOWN_MASK | BUTTON_RIGHT_MASK;
+}
+
+
+void PIT0_IRQHandler(void) {
+
+	if(dead_snake){
+		delay_rip(2, 5, rip_move++);
+	}
+	else{
+		delay_snake(5, 7);
+		if(move_snake()){
+			dead_snake = 1;
+		}
+	}
+
+	PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
+
+	PIT_TFLG0 |= PIT_TFLG_TIF_MASK;
+}
+
 
 int main(void)
-{
- 	SystemConfig();
-	// R7R4 R6R0R3R1                  R2 R5
-	//  11    1111   0000 0000 0000 0010 1000 0000
-	//PTA->PDOR |= GPIO_PDOR_PDO(row_select(4));
-	//PTA->PDOR |= GPIO_PDOR_PDO(0x3F000280); // turning the pixels of a particular row ON
-	//PTA->PDOR |= GPIO_PDOR_PDO( GPIO_PIN(27));
-	//PTA->PDOR |= GPIO_PDOR_PDO( GPIO_PIN(28));
-	//PTA->PDOR |= GPIO_PDOR_PDO( GPIO_PIN(36));
-	//PTA->PDDR &= ~GPIO_PDDR_PDD( GPIO_PIN(28) );
-
-	//column_select(8);
-	//PTA->PDOR |= GPIO_PDOR_PDO(0x3F000280);
+{ 	SystemConfig();
 
 	for(int i = 0; i < SNAKE_LEN; i++){
 		snake[i].x = 4;
@@ -387,67 +459,7 @@ int main(void)
 
 	display_snake();
 
-    for (;;) {
-
-
-    	//display_snake();
-
-    	delay_snake(5, 10);
-
-    	if (PORTE->ISFR & BUTTON_CENT_MASK)
-		{
-    		for(int i = 0; i < SNAKE_LEN; i++){
-				snake[i].x = 4;
-				snake[i].y = 7 + i;
-				snake[i].direction = UP;
-				snake[0].direction_prev = snake[0].direction;
-			}
-
-    		PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
-		}
-
-		else if (PORTE->ISFR & BUTTON_RIGHT_MASK)
-		{
-			snake[0].direction_prev = snake[0].direction;
-			snake[0].direction = RIGHT;
-		}
-		else if (PORTE->ISFR & BUTTON_LEFT_MASK)
-		{
-			snake[0].direction_prev = snake[0].direction;
-			snake[0].direction = LEFT;
-		}
-		else if (PORTE->ISFR & BUTTON_UP_MASK)
-		{
-			snake[0].direction_prev = snake[0].direction;
-			snake[0].direction = UP;
-		}
-		else if (PORTE->ISFR & BUTTON_DOWN_MASK)
-		{
-			snake[0].direction_prev = snake[0].direction;
-			snake[0].direction = DOWN;
-		}
-		PORTE->ISFR = BUTTON_UP_MASK | BUTTON_CENT_MASK | BUTTON_LEFT_MASK | BUTTON_DOWN_MASK | BUTTON_RIGHT_MASK;
-		if(move_snake()){
-			for(;;){
-				rip();
-				if (PORTE->ISFR & BUTTON_CENT_MASK)
-				{
-					for(int i = 0; i < SNAKE_LEN; i++){
-						snake[i].x = 4;
-						snake[i].y = 7 + i;
-						snake[i].direction = UP;
-						snake[0].direction_prev = snake[0].direction;
-					}
-
-					PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
-					break;
-				}
-			}
-			PORTE->ISFR = BUTTON_UP_MASK | BUTTON_CENT_MASK | BUTTON_LEFT_MASK | BUTTON_DOWN_MASK | BUTTON_RIGHT_MASK;
-    	}
-		PTA->PDOR &= GPIO_PDOR_PDO(CLEAR_ROWS);
-
-    }
+    for (;;);
 
     /* Never leave main */
     return 0;
